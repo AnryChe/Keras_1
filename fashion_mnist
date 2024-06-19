@@ -1,5 +1,230 @@
-import keras
 import matplotlib.pyplot as plt
-
-from keras.datasets import fashion mnist
+import keras.datasets
 import numpy as np
+import pandas as pd
+import tensorflow as tf
+from keras.layers import Dense
+from keras.models import Sequential
+from keras.utils.np_utils import to_categorical
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+# Используйте набор примеров fashion-MNIST
+
+
+(X_train, y_train_labels), (X_test, y_test_labels) = tf.keras.datasets.fashion_mnist.load_data()
+
+print(X_train.shape, X_test.shape)
+print(y_train_labels.shape)
+
+ind = np.random.randint(0, X_train.shape[0])
+plt.imshow(X_train[ind])
+print(f'Label is {y_train_labels[ind]}')
+# plt.show()
+
+X_train = X_train / 255.0
+X_test = X_test / 255.0
+
+print(X_train.min(), X_train.max())
+
+X_train = X_train.reshape((-1, 28 * 28))
+X_test = X_test.reshape((-1, 28 * 28))
+
+print(X_train.shape, X_test.shape)
+
+"""
+
+1. Опишите - какой результат нейросети получен в зависимости от:
+
+    числа нейронов в слое (для 2-х слойной сети),
+    числа слоев (2, 3, 5, 10) при близких размерах сети (близкое число тренируемых параметров).
+    фиксируйте для тренировочного и тестового набора метрики accuracy.
+
+"""
+
+neuro_quantity = [24, 48, 64, 96, 128, 256, 512, 1024, 4096, 16384]  # ряд количества нейронов для двухмерной сети
+lay_quantity = [2, 3, 5, 10]  # ряд количества слоев для многослойной сети
+
+
+def two_layers_model_generations(n_quant):  # Для 2-х слойной сети
+    t_result_compare = pd.DataFrame(columns=('Neuron q-ty', 'accuracy', 'val_acc'))
+    for n in n_quant:
+        model = Sequential()
+        model.add(Dense(n, input_shape=(28 * 28,), activation='relu'))
+        model.add(Dense(10, activation='sigmoid'))
+        model.compile(loss='categorical_crossentropy', optimizer='SGD', metrics=['accuracy'])
+        t_y_train = to_categorical(y_train_labels)
+        t_y_test = to_categorical(y_test_labels)
+        history = model.fit(X_train, t_y_train,
+                            epochs=5,
+                            batch_size=256,
+                            verbose=1,
+                            validation_data=(X_test, t_y_test)
+                            )
+        t_train_acc = max(history.history['accuracy'])
+        t_val_acc = max(history.history['val_accuracy'])
+
+        plt.plot(t_train_acc, label='train')
+        plt.plot(t_val_acc, label='val')
+        plt.legend()
+
+        t_result_compare.loc[len(t_result_compare.index)] = [n, t_train_acc, t_val_acc]
+    return t_result_compare
+
+
+two_layers_model = two_layers_model_generations(neuro_quantity)
+
+
+#  в зависимости от числа слоев (2, 3, 5, 10) при близких размерах сети (близкое число тренируемых параметров):
+
+
+def multy_layers_model_generations(layers_quantity):
+    m_result_compare = pd.DataFrame(columns=('Layer q-ty', 'accuracy', 'val_acc'))
+    for nn_layers in layers_quantity:
+        model = Sequential()
+        if nn_layers >= 10:
+            first_neuron_qt = 80
+        else:
+            first_neuron_qt = 70 - nn_layers
+        model.add(Dense(first_neuron_qt, activation='relu'))
+        for lay_qt in range(nn_layers - 2):
+            factorization_c = nn_layers - lay_qt  # определяем степень для расчета количества нейронов в слое.
+            neurons_qt = round(12 * (1.2 ** factorization_c))  # количество нейронов в зависимости от слоя
+            model.add(Dense(neurons_qt, input_shape=(28 * 28,), activation='relu'))
+        model.add(Dense(10, activation='sigmoid'))
+        model.compile(loss='categorical_crossentropy', optimizer='SGD', metrics=['accuracy'])
+        m_y_train = to_categorical(y_train_labels)
+        m_y_test = to_categorical(y_test_labels)
+        history = model.fit(X_train, m_y_train,
+                            epochs=5,
+                            batch_size=256,
+                            verbose=0,
+                            validation_data=(X_test, m_y_test)
+                            )
+        print(model.summary())
+        m_train_acc = max(history.history['accuracy'])
+        m_val_acc = max(history.history['val_accuracy'])
+        m_result_compare.loc[len(m_result_compare.index)] = [nn_layers, m_train_acc, m_val_acc]
+    return m_result_compare
+
+
+multy_layers_model = multy_layers_model_generations(lay_quantity)
+
+print(two_layers_model)
+print(multy_layers_model)
+
+# Для двухслойной сети с увеличением количества нейронов с 24 до 16384 и для тренировочного и для тестового датасета
+# метрика accuracy растет (0.775- 0.822 и 0.784 - 0.815 соответственно).
+# Для многослойной сети с увеличением количества слоев растет количество параметров (достаточно плавно для небольших
+# количеств слоев и резко возрастает при 10 слоях), но метрика accuracy падает (0,790 - 0,654 и 0,78 - 0,6195 для
+# соответственно тренировочного и тестового датасета). Т.е. оптимальным для данной задачи является двухслойная сеть.
+
+
+"""
+2. Проверьте работу разных оптимизаторов (SGD, Adam, RMSProp) для одной из моделей п.1. Фиксируйте для тренировочного и 
+тестового набора метрики accuracy.
+"""
+
+models = {}
+
+plt.figure(figsize=(16, 7))
+colors = ['g', 'b', 'r', 'y']
+
+num_epochs = 10
+batch_size = 128
+
+epoch = np.arange(num_epochs + 1)
+optimizer_res_compare = pd.DataFrame(columns=('Optimizer', 'accuracy', 'val_acc'))
+
+for i, i_optim in enumerate([keras.optimizers.gradient_descent_v2.SGD(),
+                             keras.optimizers.adagrad_v2.Adagrad(),
+                             keras.optimizers.rmsprop_v2.RMSprop(),
+                             keras.optimizers.adam_v2.Adam()]):
+    tf.random.set_seed(1)
+
+    model_i = Sequential([
+        Dense(4096, activation='relu', input_shape=(784,)),
+        Dense(10, activation='sigmoid'),
+    ])
+    y_train = to_categorical(y_train_labels)
+    y_test = to_categorical(y_test_labels)
+    model_i.compile(
+        optimizer=i_optim,
+        loss='categorical_crossentropy',
+        metrics=['accuracy'],
+    )
+
+    h0_train = model_i.evaluate(X_train, y_train, verbose=0)
+    h0_val = model_i.evaluate(X_test, y_test, verbose=0)
+
+    h = model_i.fit(X_train, y_train,
+                    epochs=num_epochs,
+                    batch_size=batch_size,
+                    validation_data=(X_test, y_test),
+                    verbose=1)
+
+    models[i_optim.get_config()['name']] = model_i
+
+    train_acc = max(h.history['accuracy'])
+    val_acc = max(h.history['val_accuracy'])
+    optimizer_res_compare.loc[len(optimizer_res_compare.index)] = [i_optim.get_config()['name'], train_acc, val_acc]
+
+print(optimizer_res_compare)
+
+"""
+
+  Optimizer  accuracy  val_acc
+0       SGD  0.846683   0.8359
+1   Adagrad  0.813400   0.8033
+2   RMSprop  0.891483   0.8771
+3      Adam  0.895517   0.8828
+"""
+
+"""
+3. Сделайте вывод - что помогло вам улучшить качество классификации в нейросети на тестовом наборе?
+
+"""
+#  Качество классификации улучшено в результате ограничения сети двумя слоями и применением достаточно большого
+#  количества нейронов, а также оптимизатора.
+
+
+"""
+4. Для одного варианта сети сформируйте матрицу ошибок по классам. Оцените качество модели по каждому классу отдельно 
+(полнота, точность).
+"""
+
+num_epochs = 10
+batch_size = 128
+
+epoch = np.arange(num_epochs + 1)
+optimizer_res_compare = pd.DataFrame(columns=('Optimizer', 'accuracy', 'val_acc'))
+
+model = Sequential([
+    Dense(4096, activation='relu', input_shape=(784,)),
+    Dense(10, activation='sigmoid'), ])
+
+y_train = to_categorical(y_train_labels)
+y_test = to_categorical(y_test_labels)
+model.compile(
+    optimizer=keras.optimizers.adam_v2.Adam(),
+    loss='categorical_crossentropy',
+    metrics=['accuracy'],
+)
+
+h0_train = model.evaluate(X_train, y_train, verbose=0)
+h0_val = model.evaluate(X_test, y_test, verbose=0)
+
+h = model.fit(X_train, y_train,
+              epochs=num_epochs,
+              batch_size=batch_size,
+              validation_data=(X_test, y_test),
+              verbose=1)
+
+predictions = model.predict(X_test)
+
+y_pred = np.argmax(predictions, axis=1)
+y_test = np.argmax(y_test, axis=1)
+cm = confusion_matrix(y_test, y_pred)
+
+disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+disp.plot()
+plt.show()
